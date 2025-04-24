@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "workspaceName": {
-      "value": "kh_log_analytics"
+      "value": "kh-log-analytics"
     },
     "location": {
       "value": "eastus"
