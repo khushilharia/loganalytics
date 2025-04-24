@@ -39,21 +39,21 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2021-12-01-previ
 }
 
 // Private Endpoint for Log Analytics
-resource privateEndpoint 'Microsoft.Network/privateEndpoints@2023-04-01' = {
-  name: '${workspaceName}-pe'
-  location: location
-  properties: {
-    subnet: {
-      id: subnet.id
-    }
-    privateLinkServiceConnections: [
-      {
-        name: 'loganalyticsConnection'
-        properties: {
-          privateLinkServiceId: logAnalytics.id
-          groupIds: [ 'workspaces' ]
-        }
-      }
-    ]
-  }
-}
+// resource privateEndpoint 'Microsoft.Network/privateEndpoints@2023-04-01' = {
+//   name: '${workspaceName}-pe'
+//   location: location
+//   properties: {
+//     subnet: {
+//       id: subnet.id
+//     }
+//     privateLinkServiceConnections: [
+//       {
+//         name: 'loganalyticsConnection'
+//         properties: {
+//           privateLinkServiceId: logAnalytics.id
+//           groupIds: [ 'workspaces' ]
+//         }
+//       }
+//     ]
+//   }
+// }
