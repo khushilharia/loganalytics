@@ -1,42 +1,158 @@
+# trigger: none
+#   # branches:
+#   #   include:
+#   #     - main
+
+# variables:
+#   azureSubscription: 'Pay-as-you-go-sc'
+#   location: 'eastus'
+#   bicepFile: 'loganalytics.bicep'
+
+# stages:
+#   - stage: CreateAzureloganalytics
+#     displayName: 'Createloganalytics'
+#     jobs:
+#       - deployment: Createloganalytics
+#         environment: 'dev'
+#         strategy:
+#           runOnce:
+#             deploy:
+#               steps:
+#                 - checkout: self
+                
+#                 - task: PublishBuildArtifacts@1
+#                   displayName: 'Publish Bicep Artifact'
+#                   inputs:
+#                     pathtoPublish: '$(System.DefaultWorkingDirectory)'
+#                     artifactName: 'bicep'
+#                     publishLocation: 'Container'
+
+#                 - task: AzureResourceManagerTemplateDeployment@3
+#                   displayName: 'Bicep to Deploy VNET'
+#                   inputs:
+#                     deploymentScope: 'Resource Group'
+#                     azureResourceManagerConnection: '$(azureSubscription)'
+#                     subscriptionId: '6f0f938c-0599-4b69-9b56-09468ec24549'
+#                     action: 'Create Or Update Resource Group'
+#                     resourceGroupName: 'khrg'
+#                     location: '$(location)'
+#                     templateLocation: 'Linked artifact'
+#                     csmFile: '$(bicepFile)'
+#                     csmParametersFile: 'loganalytics.parameters.json'
+#                     deploymentMode: 'Incremental'
+
 trigger: none
-  # branches:
-  #   include:
-  #     - main
+# branches:
+#   include:
+#     - main
 
 variables:
   azureSubscription: 'Pay-as-you-go-sc'
   location: 'eastus'
   bicepFile: 'loganalytics.bicep'
+  parametersFile: 'loganalytics.parameters.json'
+  resourceGroupName: 'khrg'
+  subscriptionId: '6f0f938c-0599-4b69-9b56-09468ec24549'
 
 stages:
-  - stage: CreateAzureloganalytics
-    displayName: 'Createloganalytics'
-    jobs:
-      - deployment: Createloganalytics
-        environment: 'dev'
-        strategy:
-          runOnce:
-            deploy:
-              steps:
-                - checkout: self
-                
-                - task: PublishBuildArtifacts@1
-                  displayName: 'Publish Bicep Artifact'
-                  inputs:
-                    pathtoPublish: '$(System.DefaultWorkingDirectory)'
-                    artifactName: 'bicep'
-                    publishLocation: 'Container'
 
-                - task: AzureResourceManagerTemplateDeployment@3
-                  displayName: 'Bicep to Deploy VNET'
-                  inputs:
-                    deploymentScope: 'Resource Group'
-                    azureResourceManagerConnection: '$(azureSubscription)'
-                    subscriptionId: '6f0f938c-0599-4b69-9b56-09468ec24549'
-                    action: 'Create Or Update Resource Group'
-                    resourceGroupName: 'khrg'
-                    location: '$(location)'
-                    templateLocation: 'Linked artifact'
-                    csmFile: '$(bicepFile)'
-                    csmParametersFile: 'loganalytics.parameters.json'
-                    deploymentMode: 'Incremental'
+  - stage: CheckoutAndLint
+    displayName: 'Checkout Code & Bicep Linting'
+    jobs:
+      - job: LintBicep
+        displayName: 'Lint Bicep Files'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+
+          - task: AzureCLI@2
+            displayName: 'Bicep Lint'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Linting Bicep..."
+                az bicep build --file $(bicepFile)
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Bicep Artifact'
+            inputs:
+              pathtoPublish: '$(System.DefaultWorkingDirectory)'
+              artifactName: 'bicep'
+              publishLocation: 'Container'
+
+  - stage: ValidateTemplate
+    displayName: 'Validate Bicep Template'
+    dependsOn: CheckoutAndLint
+    jobs:
+      - job: Validate
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - download: current
+            artifact: bicep
+
+          - task: AzureResourceManagerTemplateDeployment@3
+            displayName: 'ARM Template Validation'
+            inputs:
+              deploymentScope: 'Resource Group'
+              azureResourceManagerConnection: '$(azureSubscription)'
+              subscriptionId: '$(subscriptionId)'
+              location: '$(location)'
+              resourceGroupName: '$(resourceGroupName)'
+              templateLocation: 'Linked artifact'
+              csmFile: '$(bicepFile)'
+              csmParametersFile: '$(parametersFile)'
+              deploymentMode: 'Validation'
+
+  - stage: PreviewDeployment
+    displayName: 'What-If Deployment Preview'
+    dependsOn: ValidateTemplate
+    jobs:
+      - job: Preview
+        displayName: 'Preview Deployment Changes'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - download: current
+            artifact: bicep
+
+          - task: AzureCLI@2
+            displayName: 'What-If Deployment'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Running what-if analysis..."
+                az deployment group what-if \
+                  --resource-group $(resourceGroupName) \
+                  --template-file $(bicepFile) \
+                  --parameters @$(parametersFile) \
+
+  - stage: Deploy
+    displayName: 'Deploy Azure SQL Server'
+    dependsOn: PreviewDeployment
+    jobs:
+      - job: DeploySQL
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - download: current
+            artifact: bicep
+
+          - task: AzureResourceManagerTemplateDeployment@3
+            displayName: 'Deploy Bicep Template'
+            inputs:
+              deploymentScope: 'Resource Group'
+              azureResourceManagerConnection: '$(azureSubscription)'
+              subscriptionId: '$(subscriptionId)'
+              action: 'Create Or Update Resource Group'
+              resourceGroupName: '$(resourceGroupName)'
+              location: '$(location)'
+              templateLocation: 'Linked artifact'
+              csmFile: '$(bicepFile)'
+              csmParametersFile: '$(parametersFile)'
+              deploymentMode: 'Incremental'
